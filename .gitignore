@@ -1,0 +1,17 @@
+# --- Arduino / ESP32 Build Artifacts ---
+# Ignore the temporary build folders created by the IDE
+**/build/
+**/bin/
+**/*.o
+**/*.elf
+**/*.bin
+**/*.map
+
+# --- Libraries ---
+# Ignore third-party libraries (recommend installing via Library Manager instead)
+firmware/libraries/
+
+# --- Local Environment / OS ---
+.DS_Store
+Thumbs.db
+*.local
