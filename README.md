@@ -1,6 +1,6 @@
-# rover1: AI-Enhanced Mobile Robotics Platform 🤖
+# rover: AI-Enhanced Mobile Robotics Platform 🤖
 
-**rover1** is an advanced autonomous platform designed for high-performance edge computing, computer vision, and natural language interaction.
+**rover** is an advanced autonomous platform designed for high-performance edge computing, computer vision, and natural language interaction.
 
 ---
 
@@ -8,19 +8,29 @@
 
 ### 🧠 High-Level Controller (HLC)
 * **Compute:** NVIDIA Jetson Orin Nano 8GB Developer Kit
-* **Architecture:** Ampere (1024 CUDA Cores, 32 Tensor Cores)
-* **Environment:** JetPack 6.2.1 (L4T 36.4.7) / Ubuntu 22.04 LTS
-* **Thermals:** Stable at **48-49°C** during active vision/teleop tasks.
+* **Environment:** JetPack 6.2.1 / Ubuntu 22.04 LTS
+* **Role:** Vision processing, Speech-to-Text (Vosk), and Neural TTS (Piper).
 
 ### 🛡️ Low-Level Controller (LLC)
 * **Compute:** Maker ESP32 Pro (NULLLAB)
-* **Diagnostics:** Integrated **0.96" OLED Dashboard** (Address 0x3C) providing real-time state feedback:
-    * **STANDBY:** Initial state; awaiting first command.
-    * **ACTIVE:** Valid communication link with HLC established.
-    * **TIMEOUT!:** Safety Watchdog engaged (2s pulse loss).
-* **Focus:** Interrupt-driven quadrature encoder tracking and PWM motor drive.
+* **Role:** Interrupt-driven encoder tracking and PWM motor drive.
+* **Safety:** Autonomic Nervous System (ANS) for cliff and obstacle detection.
 
 ---
+
+## 📡 Communication Protocol (Serial @ 115200)
+
+| Direction | Format | Description |
+| :--- | :--- | :--- |
+| **Jetson -> ESP32** | `S[L],[R]\n` | Set Motor PWM (-255 to 255) |
+| **ESP32 -> Jetson** | `E[L],[R],[S],[C]\n` | Ticks, Safety State, Cliff Distance |
+
+---
+
+## 👁️ Computer Vision & Audio
+* **Vision:** GStreamer pipeline (IMX219) -> Flask FPV stream.
+* **Voice:** Vosk (STT) and Piper (TTS) for local intent processing.
+* **Mux:** TCA9548A I2C Multiplexer for 5x VL53L1X ToF and BNO085 IMU.
 
 ## ⚡ Power & Performance Benchmarks
 * **Regulation:** 19V Buck-Boost converter ensuring steady power for Orin transient spikes.
@@ -29,6 +39,32 @@
 * **Mobility:** High-torque configuration optimized for navigating floor-to-carpet transitions.
 
 ---
+
+## 📡 Communication Protocol (v2 - ANS Enabled)
+
+| Direction | Format | Description |
+| :--- | :--- | :--- |
+| **Jetson -> ESP32** | `S[L],[R]\n` | Set Motor PWM (-255 to 255) |
+| **ESP32 -> Jetson** | `E[L],[R],[S],[C]\n` | Ticks, Safety State (0/1), Cliff Dist |
+
+---
+
+### 🛠️ I2C Multiplexer (TCA9548A) Mapping
+The LLC utilizes a multiplexer to isolate high-density sensor clusters:
+
+* **CH0:** BNO085 (9-DOF IMU)
+* **CH1:** VL53L1X (Front Center)
+* **CH2:** VL53L1X (Front Left - 22.5°)
+* **CH3:** VL53L1X (Front Right - 22.5°)
+* **CH4:** VL53L1X (Front Downward - Cliff Detection)
+* **CH5:** VL53L1X (Rear Center)
+* **CH6:** RGB LED Controller (Placeholder)
+
+### 🧠 Autonomic Nervous System (ANS)
+The LLC maintains an autonomous safety loop that operates independently of HLC commands:
+1. [cite_start]**Cliff Detection:** Emergency stop if `CH4` distance exceeds 120mm. [cite: 23, 28]
+2. [cite_start]**Obstacle Avoidance:** Hard stop if any forward ToF sensor detects an object < 150mm. [cite: 23]
+3. [cite_start]**Heartbeat:** 2000ms watchdog for Jetson serial link loss. [cite: 7, 23]
 
 ## 📡 Communication Protocol (Serial @ 115200)
 
@@ -52,6 +88,7 @@ The platform utilizes a hardware-accelerated GStreamer pipeline to feed the **Fl
 
 ---
 
+
 ## 🛠️ Key Hardware Specification
 * **Actuators:** 2x JGB37 DC Motors with Hall Effect Encoders
 * **Sensors:** 4x VL53L1X Time-of-Flight (ToF) sensors & BNO085 9-DOF IMU
@@ -64,3 +101,13 @@ The platform utilizes a hardware-accelerated GStreamer pipeline to feed the **Fl
 * **STT (Ears):** **Vosk** (Offline, lightweight speech-to-text)
 * **TTS (Voice):** **Piper** (Local, high-quality neural voice synthesis)
 * **Intent:** Flexible natural language processing for varied command structures.
+
+## 🗣️ Speech Intent Library (Vosk/Piper) 
+
+| Wake Word | Command | Action | LLC Execution |
+| :--- | :--- | :--- | :--- |
+| **Rover** | "Hello" | TTS: "Hi maker, how are you?" | N/A |
+| **Rover** | "Square" | Performs a 4-edge square path | `S150,150` (1s) -> `S100,-100` (Turn) |
+
+
+---
