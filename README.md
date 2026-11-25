@@ -1,113 +1,129 @@
-# rover: AI-Enhanced Mobile Robotics Platform 🤖
+# rover1
 
-**rover** is an advanced autonomous platform designed for high-performance edge computing, computer vision, and natural language interaction.
+A two-wheel differential-drive robot with a Jetson Orin Nano and an ESP32 motor controller.
 
----
+**Current goals:**
+1. Drive it from ROS 2 as a standard differential-drive robot (`cmd_vel` in, odometry out).
+2. Build towards precise navigation: an RPLidar A1 for mapping and localisation, then
+   navigation to known places.
+3. Publish camera images to a web page.
 
-## 🏗️ Core System Architecture
-
-### 🧠 High-Level Controller (HLC)
-* **Compute:** NVIDIA Jetson Orin Nano 8GB Developer Kit
-* **Environment:** JetPack 6.2.1 / Ubuntu 22.04 LTS
-* **Role:** Vision processing, Speech-to-Text (Vosk), and Neural TTS (Piper).
-
-### 🛡️ Low-Level Controller (LLC)
-* **Compute:** Maker ESP32 Pro (NULLLAB)
-* **Role:** Interrupt-driven encoder tracking and PWM motor drive.
-* **Safety:** Autonomic Nervous System (ANS) for cliff and obstacle detection.
+Each item is described below as **working**, **in progress** or **planned**. Only working items
+have been tested.
 
 ---
 
-## 📡 Communication Protocol (Serial @ 115200)
+## Hardware
 
-| Direction | Format | Description |
+| Part | Details | Status |
 | :--- | :--- | :--- |
-| **Jetson -> ESP32** | `S[L],[R]\n` | Set Motor PWM (-255 to 255) |
-| **ESP32 -> Jetson** | `E[L],[R],[S],[C]\n` | Ticks, Safety State, Cliff Distance |
+| Main computer | NVIDIA Jetson Orin Nano 8 GB, JetPack 6.2.1, Ubuntu 22.04 (ROS 2 Humble) | on board |
+| Motor controller | emakefun Maker-ESP32-Pro (ESP32-D0WD-V3, 4 MB flash, CH340 USB serial), schematic in `docs/` | working |
+| Motor drivers | RZ7889 H-bridges on the board (3 A continuous, 18 V max) | working |
+| Motors | 2x JGB37-520, 12 V, 110 rpm, 90:1 gearbox, Hall encoders (11 pulses/rev) | working |
+| Wheels | 2x 85 mm rubber drive wheels, rear caster | working |
+| Lidar | Slamtec RPLidar A1 | planned (mount to be designed) |
+| Camera | Raspberry Pi Camera v2.1 (IMX219) | on board, not yet used by the new software |
+| Power | 12 V for the motors; 19 V buck-boost regulator for the Orin | bench supply used for testing |
+
+### Motor wiring (confirmed)
+
+| Side | Board port | Driver | FI / BI pins | Encoder A / B |
+| :--- | :--- | :--- | :--- | :--- |
+| Left | E3 | U7 | GPIO 15 / 14 | GPIO 34 / 39 |
+| Right | E2 | U8 | GPIO 17 / 12 | GPIO 35 / 36 |
+
+- DIP switch SW1 must be ON: it connects GPIO 12/14/15/17 to the motor drivers.
+- GPIO 12 is a boot strapping pin, so the firmware drives it LOW first thing at startup.
+- GPIO 34–39 are input-only with no internal pull-ups; the encoders provide their own.
+- All pins and drive-train constants live in one place: `firmware/lib/rover_hw/rover_hw.h`.
+
+### Measured motor behaviour (motor_test, 2026-11-24, wheels off the ground, 12 V)
+
+- **Directions:** forward means the caster is at the back. The left motor is wired reversed
+  (inverted in software). The right encoder counts reversed (also inverted in software). Forward
+  counts are positive on both sides.
+- **PWM:** brake mode at 20 kHz, 10-bit. One driver input is held HIGH and the other is pulsed,
+  so the motor alternates between drive and brake. Speed rises evenly from 30 % to 100 %.
+  Coast mode (pulsing with the other input LOW) was erratic below about 70 %.
+- **Encoders:** 3,960 counts per wheel turn (11 x 90 x 4 edges, using the ESP32's hardware pulse
+  counter). Confirmed by hand: 10 turns = 39,586 counts. That is about 0.067 mm of travel per count.
+- **Speed:** about 6,800 counts/s at 100 % (about 103 rpm, 0.46 m/s). The two motors match
+  within about 3 %.
 
 ---
 
-## 👁️ Computer Vision & Audio
-* **Vision:** GStreamer pipeline (IMX219) -> Flask FPV stream.
-* **Voice:** Vosk (STT) and Piper (TTS) for local intent processing.
-* **Mux:** TCA9548A I2C Multiplexer for 5x VL53L1X ToF and BNO085 IMU.
+## Software
 
-## ⚡ Power & Performance Benchmarks
-* **Regulation:** 19V Buck-Boost converter ensuring steady power for Orin transient spikes.
-* **Idle Consumption:** ~5W (Camera stream + Teleop active).
-* **Load Consumption:** 7.2W - 7.4W (Full-speed drive on carpet transitions).
-* **Mobility:** High-torque configuration optimized for navigating floor-to-carpet transitions.
+### ESP32 firmware (`firmware/`, PlatformIO)
 
----
+One PlatformIO project, with one environment per program:
 
-## 📡 Communication Protocol (v2 - ANS Enabled)
-
-| Direction | Format | Description |
-| :--- | :--- | :--- |
-| **Jetson -> ESP32** | `S[L],[R]\n` | Set Motor PWM (-255 to 255) |
-| **ESP32 -> Jetson** | `E[L],[R],[S],[C]\n` | Ticks, Safety State (0/1), Cliff Dist |
-
----
-
-### 🛠️ I2C Multiplexer (TCA9548A) Mapping
-The LLC utilizes a multiplexer to isolate high-density sensor clusters:
-
-* **CH0:** BNO085 (9-DOF IMU)
-* **CH1:** VL53L1X (Front Center)
-* **CH2:** VL53L1X (Front Left - 22.5°)
-* **CH3:** VL53L1X (Front Right - 22.5°)
-* **CH4:** VL53L1X (Front Downward - Cliff Detection)
-* **CH5:** VL53L1X (Rear Center)
-* **CH6:** RGB LED Controller (Placeholder)
-
-### 🧠 Autonomic Nervous System (ANS)
-The LLC maintains an autonomous safety loop that operates independently of HLC commands:
-1. [cite_start]**Cliff Detection:** Emergency stop if `CH4` distance exceeds 120mm. [cite: 23, 28]
-2. [cite_start]**Obstacle Avoidance:** Hard stop if any forward ToF sensor detects an object < 150mm. [cite: 23]
-3. [cite_start]**Heartbeat:** 2000ms watchdog for Jetson serial link loss. [cite: 7, 23]
-
-## 📡 Communication Protocol (Serial @ 115200)
-
-The Jetson Orin Nano delegates real-time tasks to the ESP32 via a strict heartbeat protocol.
-
-| Direction | Format | Description |
-| :--- | :--- | :--- |
-| **Jetson -> ESP32** | `S[L],[R]\n` | Set Motor PWM (-255 to 255) |
-| **ESP32 -> Jetson** | `E[L],[R]\n` | Signed Encoder Ticks (10Hz Telemetry) |
-
-> [!IMPORTANT]
-> **Safety Watchdog:** The LLC will execute an emergency hardware stop if no valid `S` command is received within a **2000ms** window.
-
----
-
-## 👁️ Computer Vision (GStreamer)
-The platform utilizes a hardware-accelerated GStreamer pipeline to feed the **Flask FPV stream**:
-* **Source:** Raspberry Pi Camera 2.1 (IMX219)
-* **Pipeline:** `nvarguscamerasrc` -> `nvvidconv` -> `videoconvert`
-* **Resolution:** 1280x720 capture / 640x360 stream @ 30fps.
-
----
-
-
-## 🛠️ Key Hardware Specification
-* **Actuators:** 2x JGB37 DC Motors with Hall Effect Encoders
-* **Sensors:** 4x VL53L1X Time-of-Flight (ToF) sensors & BNO085 9-DOF IMU
-* **Audio:** Waveshare USB-to-I2S Audio Card & Dual Microphones
-* **Compute:** Jetson Orin Nano 8GB (HLC) & Maker ESP32 Pro (LLC)
-
----
-
-## 🗣️ Speech & Intent
-* **STT (Ears):** **Vosk** (Offline, lightweight speech-to-text)
-* **TTS (Voice):** **Piper** (Local, high-quality neural voice synthesis)
-* **Intent:** Flexible natural language processing for varied command structures.
-
-## 🗣️ Speech Intent Library (Vosk/Piper) 
-
-| Wake Word | Command | Action | LLC Execution |
+| Environment | Source | Purpose | Status |
 | :--- | :--- | :--- | :--- |
-| **Rover** | "Hello" | TTS: "Hi maker, how are you?" | N/A |
-| **Rover** | "Square" | Performs a 4-edge square path | `S150,150` (1s) -> `S100,-100` (Turn) |
+| `motor_test` | `src/motor_test/` | Bench test: run each wheel, sweep PWM settings, read encoders | working (v1.0.11) |
+| `llc` | `src/llc/` | Low-level controller used with ROS (see below) | planned |
 
+Shared code is in `lib/rover_hw/` (pins, directions, PWM settings, drive-train constants).
+Platform: pioarduino 55.03.39 (Arduino-ESP32 3.3.9 / ESP-IDF 5.5.4).
+
+Build and upload from `firmware/` (or use the PlatformIO buttons in VS Code):
+
+```
+pio run -e motor_test -t upload
+pio device monitor
+```
+
+The motor test prints its version and build time at startup. Commands: `l`/`r`/`b` run the left,
+right or both wheels forward (capitals for backward), `+`/`-` change power, `w` sweeps both
+wheels over all PWM frequencies and powers, `c` shows live encoder counts, and `?` lists the rest.
+
+A full backup of the board's original firmware is in `rover1_esp32_backup.bin`. To restore it:
+`esptool write-flash 0 rover1_esp32_backup.bin`.
+
+### Low-level controller firmware (planned)
+
+- Per-wheel speed control (PID at about 100 Hz) using the encoders.
+- Watchdog: the motors stop if no command arrives for about 0.3 s.
+- Telemetry to the Jetson at about 50 Hz: encoder counts with timestamps.
+- A simple line-based serial protocol with checksums, documented here once it exists.
+
+### ROS 2 on the Jetson (planned)
+
+In order:
+1. **Differential drive.** A ros2_control hardware interface for the ESP32, with
+   `diff_drive_controller`, URDF and teleop. `cmd_vel` drives the robot; wheel odometry is published.
+2. **Lidar.** Design and print the RPLidar A1 mount; `rplidar_ros` publishing `/scan`.
+3. **Mapping.** `slam_toolbox` to build a map of the house.
+4. **Navigation.** Nav2 localising on the saved map and driving to named places.
+
+ROS networking will use a Fast DDS discovery server, so rover1 can later talk to other robots
+(such as Piper) without relying on multicast discovery.
+
+### Camera web page (planned)
+
+Publish camera images to a web page served from the Jetson. `src/rover_stream.py` (from the
+earlier design) streams camera frames with Flask and is a possible starting point.
 
 ---
+
+## Earlier design (to be archived)
+
+These are from the pre-ROS design and are not part of the current plan. They stay in the repo
+until the replacements work, then move to an archive folder.
+
+- `firmware/Rover1_LLC/`, `firmware/Calibrate_Encoder/`, `firmware/libraries/`: Arduino sketches
+  and libraries for the old controller (encoders, distance sensors, IMU).
+- `src/`, `start_rover.sh`: Python serial broker, camera stream, joystick teleop and voice
+  commands. Voice control is dropped.
+- The board's TCA9548A multiplexer, VL53L1X distance sensors and BNO085 IMU were used by the old
+  firmware. The IMU may be added back later to improve odometry for navigation.
+
+---
+
+## Change history
+
+| Version | Date | Change |
+| :--- | :--- | :--- |
+| 2.0.0 | 2026-11-24 | Rewritten for the current goals (ROS differential drive, lidar navigation, camera web page). Speech and voice commands removed. Confirmed wiring, motor measurements and the new PlatformIO firmware added; the earlier design is marked for archiving. |
+| 1.x | 2026-04 | Original README (Vosk/Piper voice, Flask stream, safety loop). |
