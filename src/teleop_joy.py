@@ -1,23 +1,20 @@
 import pygame
-import serial
+import socket
+import json
 import time
 
-# --- HARDWARE SETTINGS ---
-SERIAL_PORT = '/dev/ttyUSB0'
-BAUD_RATE = 115200
+# --- NETWORK SETTINGS ---
+# We now talk to the Broker instead of the Serial Port
+UDP_IP = "127.0.0.1"
+UDP_PORT = 5005
 
 # --- MOVEMENT SETTINGS ---
 STEADY_SPEED = 140   
 FAST_SPEED = 200     
 TURN_SENSITIVITY = 85 
 
-try:
-    # Increased timeout slightly for better stability
-    ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
-    print(f"Connected to ESP32 on {SERIAL_PORT}")
-except Exception as e:
-    ser = None
-    print(f"ESP32 not found ({e}). Running in VIRTUAL mode.")
+# Setup UDP Socket for sending commands to the Broker
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 pygame.init()
 pygame.joystick.init()
@@ -40,44 +37,35 @@ def get_stepped_velocity(axis_val):
         return sign * FAST_SPEED
 
 try:
-    print(f"--- Rover1 Teleop Active ---")
+    print(f"--- Rover1 Teleop (via Broker) Active ---")
     while True:
         pygame.event.pump()
         
-        # 1. Linear (Left Stick Y - Axis 1)
+        # 1. Linear (Left Stick Y)
         ls_y = -j.get_axis(1) 
         target_v = get_stepped_velocity(ls_y)
         
-        # 2. Steering (Right Stick X - Axis 2)
+        # 2. Steering (Right Stick X)
         rs_x = j.get_axis(2) 
-        if abs(rs_x) < 0.1:
-            target_w = 0
-        else:
-            # target_w is the speed difference between wheels
-            target_w = int(rs_x * TURN_SENSITIVITY)
+        target_w = int(rs_x * TURN_SENSITIVITY) if abs(rs_x) > 0.1 else 0
         
         # 3. DIFFERENTIAL DRIVE KINEMATICS
-        # Mixing V and W to get specific motor PWM values
-        l_pwm = target_v + target_w
-        r_pwm = target_v - target_w
+        l_pwm = max(min(target_v + target_w, 255), -255)
+        r_pwm = max(min(target_v - target_w, 255), -255)
         
-        # 4. CONSTRAIN (Ensure we stay within -255 to 255)
-        l_pwm = max(min(l_pwm, 255), -255)
-        r_pwm = max(min(r_pwm, 255), -255)
+        # 4. FORMAT FOR BROKER
+        # The Broker expects a JSON object with a "cmd" key
+        command_str = f"S{l_pwm},{r_pwm}"
+        payload = json.dumps({"cmd": command_str})
         
-        # 5. NEW COMMAND FORMAT: S[Left],[Right]
-        command = f"S{l_pwm},{r_pwm}\n"
+        # 5. SEND VIA UDP
+        sock.sendto(payload.encode(), (UDP_IP, UDP_PORT))
         
-        # Print intent for debugging
-        print(f"V:{target_v} W:{target_w} -> SENDING: {command.strip()}      ", end='\r')
-        
-        if ser:
-            ser.write(command.encode())
-            ser.flush() 
-            
+        print(f"SENDING TO BROKER: {command_str}      ", end='\r')
         time.sleep(0.05)
 
 except KeyboardInterrupt:
-    if ser:
-        ser.write(b"MOVE:0:0\n")
-    print("\nTeleop Halted. Emergency Brake Applied.")
+    # Emergency Stop via Broker
+    stop_payload = json.dumps({"cmd": "S0,0"})
+    sock.sendto(stop_payload.encode(), (UDP_IP, UDP_PORT))
+    print("\nTeleop Halted. Emergency Brake Sent to Broker.")

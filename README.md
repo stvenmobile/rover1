@@ -22,9 +22,36 @@ have been tested.
 | Motor drivers | RZ7889 H-bridges on the board (3 A continuous, 18 V max) | working |
 | Motors | 2x JGB37-520, 12 V, 110 rpm, 90:1 gearbox, Hall encoders (11 pulses/rev) | working |
 | Wheels | 2x 85 mm rubber drive wheels, rear caster | working |
-| Lidar | Slamtec RPLidar A1 | planned (mount to be designed) |
+| Lidar | Slamtec RPLidar A1 | planned (deck 3, already in the chassis file) |
 | Camera | Raspberry Pi Camera v2.1 (IMX219) | on board, not yet used by the new software |
 | Power | 12 V for the motors; 19 V buck-boost regulator for the Orin | bench supply used for testing |
+
+### Chassis
+
+The chassis is 3D printed. It comes from **Weddell 2: Differential drive robot powered by ROS**
+by Thingiverse user *pokpong* ([thing:3787601](https://www.thingiverse.com/thing:3787601)),
+in the remix **Modified Weddell 2 robot for ROS/RPi4** by *jbowling* (Jason Bowling,
+[thing:4697812](https://www.thingiverse.com/thing:4697812)). The remix changes the motor plate
+for low-cost gear motors with encoders; Jason Bowling's
+[build write-up](https://medium.com/swlh/building-an-inexpensive-3-d-printed-ros-robot-625ac7766f4a)
+has assembly notes.
+
+The print file is `hardware/cad/rover1.3mf` (Bambu Studio, 2024-07-29). It holds the parts as meshes,
+which can also serve as visual meshes in the URDF.
+
+Each deck is two half-plates (98 x 196 mm each), joined where their straight-edge tabs overlap,
+giving a deck about 196 mm square. The original design spaces the decks with 50 mm PCB standoffs.
+The front and back "masks" (148 x 54.5 mm) fill the gap between two decks and carry sensors.
+
+| Layer | Parts | Carries | Status |
+| :--- | :--- | :--- | :--- |
+| 1 (bottom) | `motorPlate-dual` x2 | Motors and batteries underneath; buck converter and ESP32 on top | built |
+| 1 to 2 | `mask_pi_camera_modified` (front), `mask_template_modified` (back) | Camera at the front | built |
+| 2 | `base_RaspberryPi_B` x2 | Jetson Orin Nano | built |
+| 3 (top) | `base_RplidarA1_A` + `base_RplidarA1_B` | RPLidar A1 (`lidar_serial_housing` holds its USB adapter) | planned |
+
+Before printing layer 3: measure the height of the Orin Nano's heatsink and fan above deck 2 (the
+original 50 mm spacing was set for a Jetson Nano), and check the lidar holes against the A1.
 
 ### Motor wiring (confirmed)
 
@@ -93,7 +120,7 @@ A full backup of the board's original firmware is in `rover1_esp32_backup.bin`. 
 In order:
 1. **Differential drive.** A ros2_control hardware interface for the ESP32, with
    `diff_drive_controller`, URDF and teleop. `cmd_vel` drives the robot; wheel odometry is published.
-2. **Lidar.** Design and print the RPLidar A1 mount; `rplidar_ros` publishing `/scan`.
+2. **Lidar.** Print the lidar deck (layer 3); `rplidar_ros` publishing `/scan`.
 3. **Mapping.** `slam_toolbox` to build a map of the house.
 4. **Navigation.** Nav2 localising on the saved map and driving to named places.
 
@@ -125,5 +152,6 @@ until the replacements work, then move to an archive folder.
 
 | Version | Date | Change |
 | :--- | :--- | :--- |
+| 2.1.0 | 2026-11-24 | Chassis section: credit to Weddell 2 (pokpong) and the jbowling remix, layer layout from `hardware/cad/rover1.3mf`, lidar deck noted as planned. |
 | 2.0.0 | 2026-11-24 | Rewritten for the current goals (ROS differential drive, lidar navigation, camera web page). Speech and voice commands removed. Confirmed wiring, motor measurements and the new PlatformIO firmware added; the earlier design is marked for archiving. |
 | 1.x | 2026-04 | Original README (Vosk/Piper voice, Flask stream, safety loop). |
