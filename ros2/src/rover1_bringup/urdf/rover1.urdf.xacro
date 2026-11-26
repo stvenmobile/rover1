@@ -1,0 +1,146 @@
+<?xml version="1.0"?>
+<!--
+  rover1.urdf.xacro - rover1 two-wheel differential drive robot (ROS 2 Humble)
+
+  Frames: base_footprint (on the ground, midway between the wheels) -> base_link (axle height).
+  Forward (+x) = caster at the back, as in the firmware and README.
+
+  Values marked GUESS are not measured yet. Measure them and update this file AND
+  config/rover1_controllers.yaml (wheel_separation and wheel_radius appear in both).
+-->
+<robot name="rover1" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:arg name="use_mock_hardware" default="false"/>
+  <xacro:arg name="device" default="/dev/rover1_llc"/>
+
+  <!-- drive train -->
+  <xacro:property name="wheel_radius" value="0.0438"/>      <!-- measured 87.6 mm diameter (2026-11-26; rover_hw.h still says 85) -->
+  <xacro:property name="wheel_separation" value="0.221"/>   <!-- measured 221 mm tyre centre to centre (2026-11-26). Fine-tune with the spin test -->
+  <xacro:property name="wheel_width" value="0.0316"/>       <!-- measured 31.6 mm -->
+  <xacro:property name="counts_per_rev" value="3960"/>      <!-- rover_hw.h COUNTS_PER_REV -->
+
+  <!-- body: one deck is about 196 x 196 mm (README) -->
+  <xacro:property name="body_length" value="0.196"/>
+  <xacro:property name="body_width" value="0.196"/>
+  <xacro:property name="body_height" value="0.120"/>        <!-- GUESS: decks 1-2 with 50 mm standoffs -->
+  <xacro:property name="body_x_offset" value="-0.040"/>     <!-- GUESS: body centre behind the axle -->
+  <xacro:property name="body_z_offset" value="0.005"/>      <!-- GUESS: underside of deck 1 above the axle -->
+  <xacro:property name="caster_x" value="-0.120"/>          <!-- GUESS: caster behind the axle -->
+  <xacro:property name="caster_radius" value="0.015"/>      <!-- GUESS -->
+  <xacro:property name="mass_body" value="1.5"/>            <!-- GUESS, only matters for simulation -->
+  <xacro:property name="mass_wheel" value="0.1"/>           <!-- GUESS -->
+
+  <material name="body_grey"><color rgba="0.6 0.6 0.65 1.0"/></material>
+  <material name="tyre_black"><color rgba="0.1 0.1 0.1 1.0"/></material>
+
+  <link name="base_footprint"/>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="${body_x_offset} 0 ${body_z_offset + body_height / 2}"/>
+      <geometry><box size="${body_length} ${body_width} ${body_height}"/></geometry>
+      <material name="body_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="${body_x_offset} 0 ${body_z_offset + body_height / 2}"/>
+      <geometry><box size="${body_length} ${body_width} ${body_height}"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="${body_x_offset} 0 ${body_z_offset + body_height / 2}"/>
+      <mass value="${mass_body}"/>
+      <inertia ixx="${mass_body * (body_width**2 + body_height**2) / 12}" ixy="0" ixz="0"
+               iyy="${mass_body * (body_length**2 + body_height**2) / 12}" iyz="0"
+               izz="${mass_body * (body_length**2 + body_width**2) / 12}"/>
+    </inertial>
+  </link>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 ${wheel_radius}"/>
+  </joint>
+
+  <xacro:macro name="wheel" params="side y">
+    <link name="${side}_wheel">
+      <visual>
+        <origin rpy="${pi / 2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+        <material name="tyre_black"/>
+      </visual>
+      <collision>
+        <origin rpy="${pi / 2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      </collision>
+      <inertial>
+        <origin rpy="${pi / 2} 0 0"/>
+        <mass value="${mass_wheel}"/>
+        <inertia ixx="${mass_wheel * (3 * wheel_radius**2 + wheel_width**2) / 12}" ixy="0" ixz="0"
+                 iyy="${mass_wheel * (3 * wheel_radius**2 + wheel_width**2) / 12}" iyz="0"
+                 izz="${mass_wheel * wheel_radius**2 / 2}"/>
+      </inertial>
+    </link>
+    <!-- axis +y: positive joint velocity drives the robot forward on both sides -->
+    <joint name="${side}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="${side}_wheel"/>
+      <origin xyz="0 ${y} 0"/>
+      <axis xyz="0 1 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:wheel side="left" y="${wheel_separation / 2}"/>
+  <xacro:wheel side="right" y="${-wheel_separation / 2}"/>
+
+  <link name="caster">
+    <visual>
+      <geometry><sphere radius="${caster_radius}"/></geometry>
+      <material name="tyre_black"/>
+    </visual>
+    <collision>
+      <geometry><sphere radius="${caster_radius}"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="0.02"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+    </inertial>
+  </link>
+  <joint name="caster_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="caster"/>
+    <origin xyz="${caster_x} 0 ${caster_radius - wheel_radius}"/>
+  </joint>
+
+  <!-- ros2_control: the ESP32 low-level controller, or a mock for testing without the robot -->
+  <ros2_control name="rover1_system" type="system">
+    <hardware>
+      <xacro:if value="$(arg use_mock_hardware)">
+        <plugin>mock_components/GenericSystem</plugin>
+        <param name="calculate_dynamics">true</param>
+      </xacro:if>
+      <xacro:unless value="$(arg use_mock_hardware)">
+        <plugin>rover1_hardware/Rover1System</plugin>
+        <param name="device">$(arg device)</param>
+        <param name="baud">115200</param>
+        <param name="counts_per_rev">${counts_per_rev}</param>
+        <param name="left_joint">left_wheel_joint</param>
+        <param name="right_joint">right_wheel_joint</param>
+        <param name="watchdog_ms">300</param>          <!-- ESP32 stops the motors after this without a command -->
+        <param name="telemetry_period_ms">20</param>   <!-- 50 Hz, matches controller_manager update_rate -->
+        <param name="startup_timeout_s">5.0</param>    <!-- opening the port may reset the ESP32 -->
+        <param name="telemetry_timeout_s">0.5</param>
+        <param name="deadband_cps">30</param>          <!-- smaller wheel targets are sent as 0 (coast) -->
+      </xacro:unless>
+    </hardware>
+    <joint name="left_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="right_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+
+</robot>

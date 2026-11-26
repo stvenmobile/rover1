@@ -1,0 +1,7 @@
+<library path="rover1_hardware">
+  <class name="rover1_hardware/Rover1System"
+         type="rover1_hardware::Rover1System"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>rover1 ESP32 low-level controller over USB serial: wheel speed commands, encoder telemetry.</description>
+  </class>
+</library>

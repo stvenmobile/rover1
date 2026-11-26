@@ -1,0 +1,6 @@
+# 99-rover1.rules - stable name for the ESP32 board (CH340 USB serial, 1a86:7523): /dev/rover1_llc
+# Install: sudo cp 99-rover1.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+# If another CH340 device is ever plugged in, add ATTRS{serial} or KERNELS== (USB port path) to tell them apart:
+#   udevadm info -a -n /dev/ttyUSB0 | grep -E 'serial|KERNELS'
+# (The RPLidar A1's adapter is a CP2102, 10c4:ea60, so it doesn't clash.)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="rover1_llc", GROUP="dialout", MODE="0660"

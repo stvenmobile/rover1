@@ -1,0 +1,53 @@
+# rover1_controllers.yaml - controller_manager, joint_state_broadcaster and diff_drive_controller (ROS 2 Humble)
+#
+# wheel_separation and wheel_radius must match urdf/rover1.urdf.xacro.
+
+controller_manager:
+  ros__parameters:
+    update_rate: 50  # Hz. The ESP32 sends telemetry at 50 Hz and runs its own 100 Hz speed loop.
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    diff_drive_controller:
+      type: diff_drive_controller/DiffDriveController
+
+diff_drive_controller:
+  ros__parameters:
+    left_wheel_names: ["left_wheel_joint"]
+    right_wheel_names: ["right_wheel_joint"]
+
+    wheel_separation: 0.221  # measured 221 mm tyre centre to centre (2026-11-26); fine-tune with the spin test (see README)
+    wheel_radius: 0.0438     # measured 87.6 mm diameter (2026-11-26); fine-tune with the straight-line test
+    wheel_separation_multiplier: 1.0
+    left_wheel_radius_multiplier: 1.0
+    right_wheel_radius_multiplier: 1.0
+
+    publish_rate: 50.0
+    odom_frame_id: odom
+    base_frame_id: base_footprint
+    # GUESS: typical values for wheel odometry; tune when an EKF / Nav2 uses them
+    pose_covariance_diagonal: [0.001, 0.001, 1000000.0, 1000000.0, 1000000.0, 0.01]
+    twist_covariance_diagonal: [0.001, 0.001, 1000000.0, 1000000.0, 1000000.0, 0.01]
+
+    open_loop: false
+    position_feedback: true   # odometry from encoder counts, not commanded speeds
+    enable_odom_tf: true      # turn off later if robot_localization publishes odom -> base_footprint
+
+    cmd_vel_timeout: 0.5      # s. Stop if cmd_vel stops (the ESP32 also has its own 300 ms watchdog)
+    use_stamped_vel: false    # accept plain geometry_msgs/Twist (teleop_twist_keyboard / teleop_twist_joy)
+
+    # Measured top speed is 0.46 m/s with the wheels off the ground at 12 V; leave headroom for load.
+    linear.x.has_velocity_limits: true
+    linear.x.has_acceleration_limits: true
+    linear.x.max_velocity: 0.35
+    linear.x.min_velocity: -0.35
+    linear.x.max_acceleration: 1.0     # GUESS. The firmware also limits wheel acceleration (~1.3 m/s^2)
+    linear.x.min_acceleration: -1.0
+
+    angular.z.has_velocity_limits: true
+    angular.z.has_acceleration_limits: true
+    angular.z.max_velocity: 2.5        # rad/s. GUESS, depends on wheel_separation
+    angular.z.min_velocity: -2.5
+    angular.z.max_acceleration: 6.0    # GUESS
+    angular.z.min_acceleration: -6.0
